@@ -8,15 +8,11 @@
 #include <utility>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 #include "geo_gcs.h"
 
 namespace geo {
-
-  namespace details {
-    class projection_manager;
-  }
-
   class projection
   {
   public:
@@ -28,29 +24,32 @@ namespace geo {
 
     virtual std::pair<double, double> transform_i(double X, double Y) = 0;
 
-    virtual details::projection_manager reset_gcs(gcs* p_gcs) = 0;
+    virtual projection* reset_gcs(gcs* p_gcs) = 0;
 
     virtual const char* name() = 0;
   };
 
-  namespace details {
-    class projection_manager
+  class projection;
+
+  class projection_context
+  {
+  public:
+    template<typename T>
+    T* create_projection(gcs* gcs)
     {
-    public:
-      projection_manager(projection* p)
-        : m_p(p)
-      { }
+      return new T{ gcs, this };
+    }
 
-      operator projection*()
-      { return m_p.get(); }
+    ~projection_context()
+    {
+      for (projection* p : projections) {
+        delete p;
+      }
+    }
 
-      projection* operator->()
-      { return m_p.get(); }
-
-    private:
-      std::unique_ptr<projection> m_p;
-    };
-  }
+  private:
+    std::vector<projection*> projections;
+  };
 
   /* todo: move the template parameter to this class's member */
   template<std::size_t n>
@@ -58,10 +57,11 @@ namespace geo {
   {
   private:
     gcs* m_gcs;
+    projection_context* m_context;
 
   public:
-    explicit gaussian_zone3_projection(gcs* p_gcs)
-      : m_gcs(p_gcs)
+    explicit gaussian_zone3_projection(gcs* p_gcs, projection_context* context = nullptr)
+      : m_gcs(p_gcs), m_context(context)
     { }
 
     std::pair<double, double> transform_p(double B, double L) override
@@ -166,13 +166,17 @@ namespace geo {
       return {B * 180 / std::numbers::pi, n * 3 + l * 180 / std::numbers::pi};
     }
 
-    details::projection_manager reset_gcs(gcs* p_gcs) override
-    { return { new gaussian_zone3_projection{p_gcs} }; }
+    gaussian_zone3_projection* reset_gcs(gcs* p_gcs) override
+    {
+      if (m_context == nullptr) {
+        throw ;
+      }
+
+      return m_context->create_projection<gaussian_zone3_projection>(p_gcs);
+    }
 
     const char* name() override
-    {
-      return "GK_ZONE3";
-    }
+    { return "GK_ZONE3"; }
   };
 }
 
